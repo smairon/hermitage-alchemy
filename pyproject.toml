@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "hermitage-alchemy"
-version = "0.1.2"
+version = "0.1.3"
 description = "Implementation of hermitage contracts for sqlalchemy engine"
 authors = ["Smairon <man@smairon.ru>"]
 readme = "README.md"
@@ -8,7 +8,7 @@ packages = [{ include = "hermitage_alchemy" }]
 
 [tool.poetry.dependencies]
 python = "^3.11"
-hermitage = "^0.1.0"
+hermitage = "^0.1.4"
 sqlalchemy = "^2.0.20"
 
 
