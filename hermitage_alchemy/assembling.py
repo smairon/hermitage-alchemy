@@ -1,82 +1,99 @@
 import abc
 import collections.abc
 import operator
-import functools
-from collections import deque
+import typing
 
 import sqlalchemy
-import hermitage
+import zodchy
+from collections import deque
 
-from .definition import contracts
-from .configuration import Schema
+from hermitage.notation.default import (
+    Bucket,
+    Item,
+    Total,
+    Clause,
+    Slice,
+    ClauseExpression,
+    AND,
+    OR
+)
+from .configuration import (
+    Schema,
+    M2O,
+    Address,
+    Space,
+    TOTAL_QUERY_FIELD
+)
 
 
 class ClauseCompiler(abc.ABC):
     def __init__(
         self,
         schema: Schema,
+        space: Space | None = None
     ):
         self._schema = schema
+        self._space = space
 
-    def __call__(self, condition: contracts.Clause) -> sqlalchemy.ClauseElement | None:
-        if condition:
-            result = self._compile(condition)
+    def get_instance(self, space: Space) -> typing.Self:
+        return type(self)(schema=self._schema, space=space)
+
+    def __call__(self, expression: ClauseExpression) -> sqlalchemy.ClauseElement | None:
+        if expression:
+            result = self._compile(expression)
             return result
 
     @abc.abstractmethod
-    def _compile(self, clause: contracts.Clause) -> sqlalchemy.ClauseElement: ...
+    def _compile(self, expression: ClauseExpression) -> sqlalchemy.ClauseElement: ...
 
 
 class FilterCompiler(ClauseCompiler):
     @property
     def _operations(self):
         return {
-            hermitage.query.EQ: self._simple_clause(operator.eq),
-            hermitage.query.NE: self._simple_clause(operator.ne),
-            hermitage.query.LE: self._simple_clause(operator.le),
-            hermitage.query.LT: self._simple_clause(operator.lt),
-            hermitage.query.GE: self._simple_clause(operator.ge),
-            hermitage.query.GT: self._simple_clause(operator.gt),
-            hermitage.query.IS: lambda v: self._get_column(v).is_(v.operation.value),
-            hermitage.query.LIKE: self._like_clause,
-            hermitage.query.NOT: self._not_clause,
-            hermitage.query.SET: self._set_clause,
-            hermitage.query.RANGE: self._range_clause,
+            zodchy.codex.query.EQ: self._simple_clause(operator.eq),
+            zodchy.codex.query.NE: self._simple_clause(operator.ne),
+            zodchy.codex.query.LE: self._simple_clause(operator.le),
+            zodchy.codex.query.LT: self._simple_clause(operator.lt),
+            zodchy.codex.query.GE: self._simple_clause(operator.ge),
+            zodchy.codex.query.GT: self._simple_clause(operator.gt),
+            zodchy.codex.query.IS: lambda v: self._get_column(v).is_(v.operation.value),
+            zodchy.codex.query.LIKE: self._like_clause,
+            zodchy.codex.query.NOT: self._not_clause,
+            zodchy.codex.query.SET: self._set_clause,
+            zodchy.codex.query.RANGE: self._range_clause,
         }
 
-    def _compile(self, clause: contracts.Clause) -> sqlalchemy.ClauseElement:
-        if clause.address:
-            return self._operations[type(clause.operation)](clause)
-
+    def _compile(self, expression: ClauseExpression) -> sqlalchemy.ClauseElement:
         stack = deque()
-        for element in clause:
-            if element is contracts.LogicalOperator.AND:
+        for element in expression:
+            if element is AND:
                 a = stack.pop()
                 b = stack.pop()
                 stack.append(sqlalchemy.and_(a, b))
-            elif element is contracts.LogicalOperator.OR:
+            elif element is OR:
                 stack.append(sqlalchemy.or_(stack.pop(), stack.pop()))
             else:
                 stack.append(self._operations[type(element.operation)](element))
 
         return stack.pop()
 
-    def _get_column(self, clause: contracts.Clause) -> sqlalchemy.Column:
-        return self._schema.get_column(clause)
+    def _get_column(self, clause: Clause) -> sqlalchemy.Column:
+        return self._schema.get_column(Address(clause.name, self._space))
 
-    def _not_clause(self, clause: contracts.Clause):
-        if isinstance(clause.operation, hermitage.query.IS):
+    def _not_clause(self, clause: Clause):
+        if isinstance(clause.operation, zodchy.codex.query.IS):
             return self._get_column(clause).isnot(clause.operation.value)
-        elif isinstance(clause.operation, hermitage.query.EQ):
+        elif isinstance(clause.operation, zodchy.codex.query.EQ):
             return operator.ne(self._get_column(clause), clause.operation.value)
-        elif isinstance(clause.operation, hermitage.query.LIKE):
+        elif isinstance(clause.operation, zodchy.codex.query.LIKE):
             return self._like_clause(
-                contracts.Clause(clause.address, clause.operation),
+                Clause(clause.name, clause.operation),
                 inversion=True
             )
-        elif isinstance(clause.operation, hermitage.query.SET):
+        elif isinstance(clause.operation, zodchy.codex.query.SET):
             return self._set_clause(
-                contracts.Clause(clause.address, clause.operation),
+                Clause(clause.name, clause.operation),
                 inversion=True
             )
         else:
@@ -88,7 +105,7 @@ class FilterCompiler(ClauseCompiler):
     def _logic_clause(self, op):
         return lambda v: op(self._compile(u) for u in v)
 
-    def _like_clause(self, clause: contracts.Clause, inversion: bool = False):
+    def _like_clause(self, clause: Clause, inversion: bool = False):
         column = self._get_column(clause)
         operation = clause.operation
         value = f'%{operation.value}%'
@@ -97,16 +114,16 @@ class FilterCompiler(ClauseCompiler):
         else:
             return column.notilike(value) if inversion else column.ilike(value)
 
-    def _set_clause(self, clause: contracts.Clause, inversion: bool = False):
+    def _set_clause(self, clause: Clause, inversion: bool = False):
         value = list(clause.operation.value)
         if inversion:
             return self._get_column(clause).notin_(value)
         else:
             return self._get_column(clause).in_(value)
 
-    def _range_clause(self, clause: contracts.Clause):
+    def _range_clause(self, clause: Clause):
         params = [
-            contracts.Clause(clause.address, condition).set_namespace(clause.namespace)
+            Clause(clause.name, condition)
             for condition in clause.operation.value
             if condition is not None
         ]
@@ -117,166 +134,145 @@ class FilterCompiler(ClauseCompiler):
 
 
 class OrderCompiler(ClauseCompiler):
-    def __call__(self, condition: contracts.Clause) -> list[sqlalchemy.ClauseElement]:
-        result = self._compile(condition)
+    def __call__(self, clause: ClauseExpression) -> list[sqlalchemy.ClauseElement]:
+        result = self._compile(clause)
         return result
 
     @property
     def _operations(self):
         return {
-            hermitage.query.ASC: sqlalchemy.asc,
-            hermitage.query.DESC: sqlalchemy.desc
+            zodchy.codex.query.ASC: sqlalchemy.asc,
+            zodchy.codex.query.DESC: sqlalchemy.desc
         }
 
-    def _compile(self, clause: contracts.Clause) -> list[sqlalchemy.ClauseElement]:
+    def _compile(self, expression: ClauseExpression) -> list[sqlalchemy.ClauseElement]:
         stack = deque()
         result = []
-        for element in clause or ():
-            if element is contracts.LogicalOperator.AND:
+        for element in expression or ():
+            if element is AND:
                 while stack:
                     result.append(stack.pop())
             else:
                 result.append(
                     self._operations[type(element.operation)](
-                        self._schema.get_column(element)
+                        self._schema.get_column(Address(element.name, self._space))
                     )
                 )
         return result
 
 
-class QueryBuilder:
+class Query:
     def __init__(
         self,
-        invoice: contracts.Invoice,
-        schema: Schema,
-        plugins: collections.abc.Mapping[type[contracts.MetaElement], collections.abc.Callable] | None = None
+        schema: Schema
     ):
         self._schema = schema
-        self._plugins = plugins
-        self._columns = []
+        self._filter_compiler = FilterCompiler(self._schema)
+        self._order_compiler = OrderCompiler(self._schema)
+        self._aliases = {}
+        self._select = []
         self._joins = []
-        self._clauses = invoice.clauses
-        self._filter = FilterCompiler(self._schema)(self._filter_clause)
-        self._order = OrderCompiler(self._schema)(self._order_clause)
-        self._limit = self._limit_clause.operation.value if self._limit_clause else None
-        self._offset = self._offset_clause.operation.value if self._offset_clause else None
-        self._parse_invoice(invoice)
-        self._apply_plugins(invoice)
+        self._values = []
+        self._filters = []
+        self._orders = []
+        self._limit = None
+        self._offset = None
 
-    @functools.cached_property
-    def columns(self) -> list[sqlalchemy.Column]:
-        return self._columns
+    def __call__(self, bucket: Bucket):
+        self._process_bucket(bucket)
+        return self._build_query(bucket)
 
-    @functools.cached_property
-    def filter(self) -> sqlalchemy.ClauseElement | None:
-        return self._filter
+    def _build_query(self, bucket: Bucket):
+        if self._select:
+            q = sqlalchemy.select(*self._select)
+        elif self._values:
+            if self._filters:
+                q = sqlalchemy.update(self._schema.get_table(Space(bucket.name))).values(self._values[0])
+            else:
+                q = sqlalchemy.insert(self._schema.get_table(Space(bucket.name))).values(self._values)
+        else:
+            q = sqlalchemy.delete(self._schema.get_table(Space(bucket.name)))
 
-    @functools.cached_property
-    def order(self) -> list[sqlalchemy.ClauseElement] | None:
-        return self._order
+        for join in self._joins:
+            q = q.join_from(*join, isouter=True)
+        for filter_clause in self._filters:
+            q = q.where(filter_clause)
+        for order_clause in self._orders:
+            q = q.order_by(order_clause)
+        if self._limit:
+            q = q.limit(self._limit)
+        if self._offset:
+            q = q.offset(self._offset)
 
-    @functools.cached_property
-    def limit(self) -> int | None:
-        return self._limit
+        return q
 
-    @functools.cached_property
-    def offset(self) -> int | None:
-        return self._offset
+    def _process_bucket(self, bucket: Bucket, parent: Space | None = None):
+        bucket_space = Space(bucket.qualified_name)
+        if parent:
+            bucket_space = parent + bucket_space
 
-    @functools.cached_property
-    def query(self):
-        query = sqlalchemy.select(*self._columns)
-        if self._joins:
-            for join in self._joins:
-                query = query.join_from(*join, isouter=True)
-        if self.filter is not None:
-            query = query.where(self.filter)
-        for condition in self.order or ():
-            query = query.order_by(condition)
-        if self.limit:
-            query = query.limit(self.limit)
-        if self.offset:
-            query = query.offset(self.offset)
-        return query
-
-    def _parse_invoice(
-        self,
-        invoice: contracts.Invoice,
-        prefix: str | None = None
-    ):
-        table = self._schema.get_table(invoice.namespace)
-
-        for item in filter(lambda x: x.address is not None, invoice.items):
-            self._columns.append(
-                table(
-                    column_address=item.address,
-                    column_alias=f'{prefix}__{item.name}' if prefix else item.name
-                )
-            )
-
-        _joins_index = set()
-        for nested_item in filter(lambda x: x.invoice is not None, invoice.items):
-            nested_invoice = nested_item.invoice
-            nested_namespace = invoice.namespace + nested_invoice.namespace
-            if link := self._schema.get_m2o(nested_namespace):
-                self._joins.append((
-                    link.source_table(),
-                    link.target_table(),
-                    link.source_table(link.source_column) == link.target_table(link.target_column)
-                ))
-                self._parse_invoice(
-                    invoice=contracts.Invoice(nested_namespace, *nested_invoice),
-                    prefix=nested_item.name
-                )
-                _joins_index.add(str(link))
-
-        for clause in filter(
-            lambda x: hermitage.query.FilterBit in x.kind.__mro__ and len(x.namespace) > 1,
-            invoice.clauses
-        ):
-            if link := self._schema.get_m2o(clause.namespace):
-                if str(link) not in _joins_index:
+        _filter_clause = None
+        _order_clause = None
+        _limit_clause = None
+        _offset_clause = None
+        for element in bucket:
+            if isinstance(element, Bucket):
+                element_space = bucket_space + Space(element.qualified_name)
+                if isinstance(link := self._schema.get_link(bucket_space, element_space), M2O):
+                    source_column = self._schema.get_column(Address(link.source_address.name, bucket_space))
+                    target_column = self._schema.get_column(Address(link.target_address.name, element_space))
                     self._joins.append((
-                        link.source_table(),
-                        link.target_table(),
-                        link.source_table(link.source_column) == link.target_table(link.target_column)
+                        self._schema.get_table(bucket_space),
+                        self._schema.get_table(element_space),
+                        source_column == target_column
                     ))
-
-    def _apply_plugins(self, invoice: contracts.Invoice):
-        for item in invoice.meta:
-            if self._plugins and (plugin := self._plugins.get(type(item))):
-                self._columns, self._filter, self._order, self._limit, self._offset = plugin()(
-                    item,
-                    self._columns,
-                    self._filter,
-                    self._order,
-                    self._limit,
-                    self._offset
+                    self._process_bucket(element, bucket_space)
+            elif isinstance(element, Item):
+                _value = element()
+                if isinstance(_value, str):
+                    self._select.append(
+                        self._schema.get_column(Address(_value, bucket_space))
+                    )
+                elif isinstance(_value, collections.abc.Mapping):
+                    self._values.append(_value)
+            elif isinstance(element, Total):
+                self._select.append(
+                    sqlalchemy.text(f"count(*) over () as {TOTAL_QUERY_FIELD}")
                 )
+            elif isinstance(element, Clause):
+                if isinstance(element.operation, zodchy.codex.query.FilterBit):
+                    _filter_clause = ClauseExpression(element) if _filter_clause is None else _filter_clause & element
+                elif isinstance(element.operation, zodchy.codex.query.OrderBit):
+                    _order_clause = ClauseExpression(element) if _order_clause is None else _order_clause & element
+            elif isinstance(element, Slice):
+                if isinstance(element.operation, zodchy.codex.query.Limit):
+                    _limit_clause = element.operation.value
+                elif isinstance(element.operation, zodchy.codex.query.Offset):
+                    _offset_clause = element.operation.value
+            elif isinstance(element, ClauseExpression):
+                if isinstance(element[0].operation, zodchy.codex.query.FilterBit):
+                    _filter_clause = element if _filter_clause is None else _filter_clause & element
+                elif isinstance(element[0].operation, zodchy.codex.query.OrderBit):
+                    _order_clause = element if _order_clause is None else _order_clause & element
 
-    @functools.cached_property
-    def _filter_clause(self) -> contracts.Clause | None:
-        clauses = filter(lambda x: hermitage.query.FilterBit in x.kind.__mro__, self._clauses)
-        try:
-            result = functools.reduce(operator.and_, clauses)
-            return result
-        except TypeError:
-            return
+        if _filter_clause:
+            filter_compiler = self._filter_compiler.get_instance(bucket_space)
+            self._filters.append(filter_compiler(_filter_clause))
 
-    @functools.cached_property
-    def _limit_clause(self) -> contracts.Clause | None:
-        for clause in filter(lambda x: isinstance(x.operation, hermitage.query.Limit), self._clauses):
-            return clause
+        if _order_clause:
+            order_compiler = self._order_compiler.get_instance(bucket_space)
+            self._orders.extend(order_compiler(_order_clause))
 
-    @functools.cached_property
-    def _offset_clause(self) -> contracts.Clause | None:
-        for clause in filter(lambda x: isinstance(x.operation, hermitage.query.Offset), self._clauses):
-            return clause
+        if _limit_clause:
+            self._limit = _limit_clause
 
-    @functools.cached_property
-    def _order_clause(self) -> contracts.Clause | None:
-        clauses = filter(lambda x: hermitage.query.OrderBit in x.kind.__mro__, self._clauses)
-        try:
-            return functools.reduce(operator.and_, clauses)
-        except TypeError:
-            return
+        if _offset_clause:
+            self._offset = _offset_clause
+
+
+class QueryBuilder:
+    def __init__(self, schema: Schema):
+        self._schema = schema
+
+    def __call__(self, bucket: Bucket):
+        return Query(schema=self._schema)(bucket)
