@@ -1,9 +1,11 @@
 import typing
 import asyncio
 
-from hermitage.notation import (
+from hermitage.notation.default import (
     Invoice,
-    Bucket
+    Bucket,
+    Upsert,
+    MetaElement
 )
 from ..configuration import Schema
 from ..assembling import QueryBuilder
@@ -22,9 +24,27 @@ class WriteExecutor:
         self._builder = builder
 
     async def __call__(self, bucket: Bucket):
-        query = self._builder(bucket)
-        result = await self._connection.execute(query)
-        return result
+        await self._apply_upsert(bucket)
+        await self._process_bucket(bucket)
+
+    async def _process_bucket(self, bucket: Bucket):
+        await self._connection.execute(self._builder(bucket))
+
+    async def _apply_upsert(self, bucket: Bucket):
+        if upsert := typing.cast(self._search_meta(bucket, Upsert), Upsert):
+            query = self._builder(
+                Bucket(
+                    bucket.name,
+                    upsert.clause
+                )
+            )
+            await self._connection.execute(query)
+
+    @staticmethod
+    def _search_meta(haystack: Bucket, needle: type[MetaElement]) -> MetaElement | None:
+        for element in haystack:
+            if isinstance(element, needle):
+                return element
 
 
 class WriteClient:

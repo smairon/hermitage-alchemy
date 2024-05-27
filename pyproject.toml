@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "hermitage-alchemy"
-version = "0.2.3"
+version = "0.2.4"
 description = "Implementation of hermitage contracts for sqlalchemy engine"
 authors = ["Smairon <man@smairon.ru>"]
 readme = "README.md"
