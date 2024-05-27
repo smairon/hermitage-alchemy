@@ -191,7 +191,10 @@ class Query:
             else:
                 q = sqlalchemy.insert(self._schema.get_table(Space(bucket.name))).values(self._values)
         else:
-            q = sqlalchemy.delete(self._schema.get_table(Space(bucket.name)))
+            if self._filters:
+                q = sqlalchemy.delete(self._schema.get_table(Space(bucket.name)))
+            else:
+                raise ValueError("Cannot determine operation type")
 
         for join in self._joins:
             q = q.join_from(*join, isouter=True)
