@@ -129,12 +129,14 @@ class Fk:
 class Schema:
     def __init__(
         self,
-        tables: collections.abc.Iterable[sqlalchemy.Table]
+        tables: collections.abc.Iterable[sqlalchemy.Table],
+        *foreign_keys: tuple[sqlalchemy.Column, sqlalchemy.Column]
     ):
         self._graph = collections.defaultdict(set)
         self._tables = {}
         self._cache = {}
         self._index_tables(tables)
+        self._index_custom_foreign_keys(*foreign_keys)
 
     def get_link(
         self,
@@ -186,6 +188,15 @@ class Schema:
                         parent_address=Address(name=fk.parent.name, space=Space(fk.parent.table.name))
                     )
                 )
+
+    def _index_custom_foreign_keys(self, *foreign_keys: tuple[sqlalchemy.Column, sqlalchemy.Column]):
+        for parent, target in foreign_keys:
+            self._graph[parent.table.name].add(
+                Fk(
+                    parent_address=Address(name=parent.name, space=Space(parent.table.name)),
+                    target_address=Address(name=target.name, space=Space(target.table.name))
+                )
+            )
 
     def _get_m2o(
         self,
