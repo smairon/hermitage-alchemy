@@ -1,3 +1,4 @@
+from . import types
 from .definition.contracts import (
     ReadAsyncConnectionContract,
     WriteAsyncConnectionContract,
