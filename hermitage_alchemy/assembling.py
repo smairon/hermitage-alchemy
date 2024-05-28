@@ -51,17 +51,17 @@ class FilterCompiler(ClauseCompiler):
     @property
     def _operations(self):
         return {
-            zodchy.codex.query.EQ: self._simple_clause(operator.eq),
-            zodchy.codex.query.NE: self._simple_clause(operator.ne),
-            zodchy.codex.query.LE: self._simple_clause(operator.le),
-            zodchy.codex.query.LT: self._simple_clause(operator.lt),
-            zodchy.codex.query.GE: self._simple_clause(operator.ge),
-            zodchy.codex.query.GT: self._simple_clause(operator.gt),
-            zodchy.codex.query.IS: lambda v: self._get_column(v).is_(v.operation.value),
-            zodchy.codex.query.LIKE: self._like_clause,
-            zodchy.codex.query.NOT: self._not_clause,
-            zodchy.codex.query.SET: self._set_clause,
-            zodchy.codex.query.RANGE: self._range_clause,
+            zodchy.operators.EQ: self._simple_clause(operator.eq),
+            zodchy.operators.NE: self._simple_clause(operator.ne),
+            zodchy.operators.LE: self._simple_clause(operator.le),
+            zodchy.operators.LT: self._simple_clause(operator.lt),
+            zodchy.operators.GE: self._simple_clause(operator.ge),
+            zodchy.operators.GT: self._simple_clause(operator.gt),
+            zodchy.operators.IS: lambda v: self._get_column(v).is_(v.operation.value),
+            zodchy.operators.LIKE: self._like_clause,
+            zodchy.operators.NOT: self._not_clause,
+            zodchy.operators.SET: self._set_clause,
+            zodchy.operators.RANGE: self._range_clause,
         }
 
     def _compile(self, expression: ClauseExpression) -> sqlalchemy.ClauseElement:
@@ -82,16 +82,16 @@ class FilterCompiler(ClauseCompiler):
         return self._schema.get_column(Address(clause.name, self._space))
 
     def _not_clause(self, clause: Clause):
-        if isinstance(clause.operation, zodchy.codex.query.IS):
+        if isinstance(clause.operation, zodchy.operators.IS):
             return self._get_column(clause).isnot(clause.operation.value)
-        elif isinstance(clause.operation, zodchy.codex.query.EQ):
+        elif isinstance(clause.operation, zodchy.operators.EQ):
             return operator.ne(self._get_column(clause), clause.operation.value)
-        elif isinstance(clause.operation, zodchy.codex.query.LIKE):
+        elif isinstance(clause.operation, zodchy.operators.LIKE):
             return self._like_clause(
                 Clause(clause.name, clause.operation),
                 inversion=True
             )
-        elif isinstance(clause.operation, zodchy.codex.query.SET):
+        elif isinstance(clause.operation, zodchy.operators.SET):
             return self._set_clause(
                 Clause(clause.name, clause.operation),
                 inversion=True
@@ -141,8 +141,8 @@ class OrderCompiler(ClauseCompiler):
     @property
     def _operations(self):
         return {
-            zodchy.codex.query.ASC: sqlalchemy.asc,
-            zodchy.codex.query.DESC: sqlalchemy.desc
+            zodchy.operators.ASC: sqlalchemy.asc,
+            zodchy.operators.DESC: sqlalchemy.desc
         }
 
     def _compile(self, expression: ClauseExpression) -> list[sqlalchemy.ClauseElement]:
@@ -243,19 +243,19 @@ class Query:
                     sqlalchemy.text(f"count(*) over () as {TOTAL_QUERY_FIELD}")
                 )
             elif isinstance(element, Clause):
-                if isinstance(element.operation, zodchy.codex.query.FilterBit):
+                if isinstance(element.operation, zodchy.operators.FilterBit):
                     _filter_clause = ClauseExpression(element) if _filter_clause is None else _filter_clause & element
-                elif isinstance(element.operation, zodchy.codex.query.OrderBit):
+                elif isinstance(element.operation, zodchy.operators.OrderBit):
                     _order_clause = ClauseExpression(element) if _order_clause is None else _order_clause & element
             elif isinstance(element, Slice):
-                if isinstance(element.operation, zodchy.codex.query.Limit):
+                if isinstance(element.operation, zodchy.operators.Limit):
                     _limit_clause = element.operation.value
-                elif isinstance(element.operation, zodchy.codex.query.Offset):
+                elif isinstance(element.operation, zodchy.operators.Offset):
                     _offset_clause = element.operation.value
             elif isinstance(element, ClauseExpression):
-                if isinstance(element[0].operation, zodchy.codex.query.FilterBit):
+                if isinstance(element[0].operation, zodchy.operators.FilterBit):
                     _filter_clause = element if _filter_clause is None else _filter_clause & element
-                elif isinstance(element[0].operation, zodchy.codex.query.OrderBit):
+                elif isinstance(element[0].operation, zodchy.operators.OrderBit):
                     _order_clause = element if _order_clause is None else _order_clause & element
 
         if _filter_clause:

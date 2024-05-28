@@ -116,7 +116,7 @@ class ReadExecutor:
                 nested_bucket += Item(link.target_address.name)
                 nested_bucket += Clause(
                     link.target_address.name,
-                    zodchy.codex.query.SET(*(e[link.source_address.name] for e in bucket_data))
+                    zodchy.operators.SET(*(e[link.source_address.name] for e in bucket_data))
                 )
                 nested_view = await self(nested_bucket, True)
                 nested_indexed_data[index_key] = self._index_data(
@@ -135,7 +135,7 @@ class ReadExecutor:
                     Item(link.interim_source_address.name),
                     Clause(
                         link.interim_source_address.name,
-                        zodchy.codex.query.SET(*(e[link.source_address.name] for e in bucket_data))
+                        zodchy.operators.SET(*(e[link.source_address.name] for e in bucket_data))
                     ),
                     nested_bucket + Item(link.target_address.name)
                 )
