@@ -31,7 +31,7 @@ class WriteExecutor:
         await self._connection.execute(self._builder(bucket))
 
     async def _apply_upsert(self, bucket: Bucket):
-        if upsert := typing.cast(self._search_meta(bucket, Upsert), Upsert):
+        if upsert := typing.cast(Upsert, self._search_meta(bucket, Upsert)):
             query = self._builder(
                 Bucket(
                     bucket.name,
