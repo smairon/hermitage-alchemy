@@ -5,14 +5,23 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from .definition import contracts
 
 
-def get_engine(dsn: str) -> contracts.AsyncEngineContract:
-    return typing.cast(
-        contracts.AsyncEngineContract,
-        create_async_engine(
-            url=dsn,
-            echo=True,
-        )
+def get_engine(
+    dsn: str,
+    debug: bool = False,
+    debug_level: typing.Literal['INFO', 'DEBUG'] = 'INFO',
+    pool_size: int | None = None,
+    max_overflow: int | None = None,
+) -> contracts.AsyncEngineContract:
+    params = dict(
+        url=dsn,
+        echo=debug_level if debug and debug_level == 'DEBUG' else debug,
+        echo_pool=debug_level if debug and debug_level == 'DEBUG' else debug,
     )
+    if pool_size:
+        params['pool_size'] = pool_size
+    if max_overflow:
+        params['max_overflow'] = max_overflow
+    return typing.cast(contracts.AsyncEngineContract, create_async_engine(**params))
 
 
 async def get_connection(engine: contracts.AsyncEngineContract) -> contracts.AsyncConnectionContract:
