@@ -48,7 +48,8 @@ class Space:
     def slice(self, start: int | None, end: int | None) -> typing.Self | None:
         _slice = self._track[start:end]
         if _slice:
-            return Space('__'.join(list(map(str, _slice))))
+            return type(self)('__'.join(list(map(str, _slice))))
+        return None
 
     def __len__(self):
         return len(self._track)
@@ -120,7 +121,9 @@ class Fk:
     target_address: Address
     parent_address: Address
 
-    def __eq__(self, other: TrackUnit) -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, TrackUnit):
+            raise NotImplemented
         return other.name == self.target_address.space.last and (
             other.qua is None or f'{other.qua}_id' == self.parent_address.name
         )
@@ -132,9 +135,9 @@ class Schema:
         tables: collections.abc.Iterable[sqlalchemy.Table],
         *foreign_keys: tuple[sqlalchemy.Column, sqlalchemy.Column]
     ):
-        self._graph = collections.defaultdict(set)
-        self._tables = {}
-        self._cache = {}
+        self._graph: collections.abc.MutableMapping = collections.defaultdict(set)
+        self._tables: collections.abc.MutableMapping[str, sqlalchemy.Table] = {}
+        self._cache: collections.abc.MutableMapping = {}
         self._index_tables(tables)
         self._index_custom_foreign_keys(*foreign_keys)
 
@@ -143,30 +146,33 @@ class Schema:
         source_space: Space,
         target_space: Space
     ):
-        link = self._get_m2o(source_space, target_space)
+        link: O2M | M2O | M2M | None = self._get_m2o(source_space, target_space)
         if not link:
             link = self._get_o2m(source_space, target_space)
         if not link:
             link = self._get_m2m(source_space, target_space)
         return link
 
-    def get_table(self, space: Space) -> sqlalchemy.Table | None:
+    def get_table(self, space: Space) -> sqlalchemy.TableClause | None:
         if str(space) in self._cache:
             return self._cache[str(space)]
         last_unit = space[-1]
-        result = self._tables.get(last_unit.name)
-        if last_unit.label or last_unit.qua:
-            result = result.alias(str(space))
-            self._cache[str(space)] = result
-        return result
+        result: typing.Any = self._tables.get(last_unit.name)
+        if result:
+            if last_unit.label or last_unit.qua:
+                result = result.alias(str(space))
+                self._cache[str(space)] = result
+            return result
+        return None
 
     def get_column(self, address: Address) -> sqlalchemy.Column | None:
         try:
             address_string = str(address)
             if address_string not in self._cache:
-                column = getattr(
-                    self.get_table(address.space).c, address.name
-                )
+                if table := self.get_table(address.space):
+                    column = getattr(table.c, address.name)
+                else:
+                    return None
                 space = address.space.slice(1, None)
                 if space:
                     column = column.label(str(Address(address.name, space)))
@@ -211,6 +217,7 @@ class Schema:
                             source_address=fk.parent_address,
                             target_address=fk.target_address
                         )
+        return None
 
     def _get_o2m(
         self,
@@ -225,6 +232,7 @@ class Schema:
                             source_address=fk.target_address,
                             target_address=fk.parent_address
                         )
+        return None
 
     def _get_m2m(
         self,
@@ -246,3 +254,4 @@ class Schema:
                         target_address=Address(target_fk.target_address.name, target_space),
                         interim_target_address=Address(target_fk.parent_address.name, Space(t)),
                     )
+        return None

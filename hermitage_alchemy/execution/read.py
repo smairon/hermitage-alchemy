@@ -28,7 +28,7 @@ class Squeezer:
 
     def __call__(
         self,
-        data: collections.abc.MutableMapping
+        data: collections.abc.Mapping
     ):
         data = self._nestify(data)
         return self._collapse_none(data)
@@ -51,7 +51,7 @@ class Squeezer:
         elif isinstance(data, bytes):
             return data
         elif isinstance(data, collections.abc.Mapping):
-            result = {}
+            result: collections.abc.MutableMapping = {}
             for k, v in data.items():
                 self._split_rec(k, self._nestify(v), result)
             return result
@@ -60,7 +60,7 @@ class Squeezer:
         else:
             return data
 
-    def _collapse_none(self, data: collections.abc.MutableMapping):
+    def _collapse_none(self, data: collections.abc.Mapping):
         if self._is_collapse_none is False:
             return data
         result = {}
@@ -154,9 +154,9 @@ class ReadExecutor:
         meta = None
         for row in bucket_data:
             if is_nested and nested_indexed_data:
-                row = dict(row)
+                row: dict = dict(row)  # type: ignore[no-redef]
             else:
-                row = self._squeezer(row)
+                row: collections.abc.MutableMapping = self._squeezer(row)  # type: ignore[no-redef]
                 if TOTAL_QUERY_FIELD in row:
                     if meta is None:
                         meta = {'total': row[TOTAL_QUERY_FIELD]}

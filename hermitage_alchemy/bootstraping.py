@@ -13,7 +13,6 @@ def get_engine(
     max_overflow: int | None = None,
 ) -> contracts.AsyncEngineContract:
     params = dict(
-        url=dsn,
         echo=debug_level if debug and debug_level == 'DEBUG' else debug,
         echo_pool=debug_level if debug and debug_level == 'DEBUG' else debug,
     )
@@ -21,7 +20,7 @@ def get_engine(
         params['pool_size'] = pool_size
     if max_overflow:
         params['max_overflow'] = max_overflow
-    return typing.cast(contracts.AsyncEngineContract, create_async_engine(**params))
+    return typing.cast(contracts.AsyncEngineContract, create_async_engine(dsn, **params))
 
 
 async def get_connection(engine: contracts.AsyncEngineContract) -> contracts.AsyncConnectionContract:
@@ -31,7 +30,7 @@ async def get_connection(engine: contracts.AsyncEngineContract) -> contracts.Asy
 async def close_connection(
     connection: contracts.AsyncConnectionContract,
     context: contracts.ShutdownContext
-) -> typing.NoReturn:
+):
     if connection:
         if context.get('exc_type'):
             await connection.rollback()

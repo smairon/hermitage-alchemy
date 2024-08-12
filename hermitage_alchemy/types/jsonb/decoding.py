@@ -1,3 +1,4 @@
+import typing
 import collections.abc
 import uuid
 import datetime
@@ -5,12 +6,13 @@ import datetime
 
 def apply_decoders(value: str):
     decoders = (uuid.UUID, datetime.datetime.fromisoformat)
+    result: typing.Any = value
     for _decoder in decoders:
         try:
-            value = _decoder(value)
+            result = _decoder(result)
         except Exception:
             continue
-    return value
+    return result
 
 
 def decode(data: collections.abc.Mapping):

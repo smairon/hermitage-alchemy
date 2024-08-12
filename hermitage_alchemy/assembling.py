@@ -38,13 +38,17 @@ class ClauseCompiler(abc.ABC):
     def get_instance(self, space: Space) -> typing.Self:
         return type(self)(schema=self._schema, space=space)
 
-    def __call__(self, expression: ClauseExpression) -> sqlalchemy.ClauseElement | None:
-        if expression:
-            result = self._compile(expression)
-            return result
+    def __call__(
+        self,
+        expression: ClauseExpression
+    ) -> sqlalchemy.ClauseElement | list[sqlalchemy.ClauseElement] | None:
+        return self._compile(expression) if expression else None
 
     @abc.abstractmethod
-    def _compile(self, expression: ClauseExpression) -> sqlalchemy.ClauseElement: ...
+    def _compile(
+        self,
+        expression: ClauseExpression
+    ) -> sqlalchemy.ClauseElement | list[sqlalchemy.ClauseElement] | None: ...
 
 
 class FilterCompiler(ClauseCompiler):
@@ -64,8 +68,8 @@ class FilterCompiler(ClauseCompiler):
             zodchy.operators.RANGE: self._range_clause,
         }
 
-    def _compile(self, expression: ClauseExpression) -> sqlalchemy.ClauseElement:
-        stack = deque()
+    def _compile(self, expression: Clause | ClauseExpression) -> sqlalchemy.ColumnElement:
+        stack: deque = deque()
         for element in expression:
             if element is AND:
                 a = stack.pop()
@@ -78,12 +82,17 @@ class FilterCompiler(ClauseCompiler):
 
         return stack.pop()
 
-    def _get_column(self, clause: Clause) -> sqlalchemy.Column:
-        return self._schema.get_column(Address(clause.name, self._space))
+    def _get_column(self, clause: Clause) -> sqlalchemy.Column | None:
+        if self._space:
+            return self._schema.get_column(Address(clause.name, self._space))
+        return None
 
-    def _not_clause(self, clause: Clause):
+    def _not_clause(self, clause: Clause) -> typing.Any:
         if isinstance(clause.operation, zodchy.operators.IS):
-            return self._get_column(clause).isnot(clause.operation.value)
+            if column := self._get_column(clause):
+                return column.isnot(clause.operation.value)
+            else:
+                raise ValueError(f'Column {clause.name} not found')
         elif isinstance(clause.operation, zodchy.operators.EQ):
             return operator.ne(self._get_column(clause), clause.operation.value)
         elif isinstance(clause.operation, zodchy.operators.LIKE):
@@ -107,19 +116,24 @@ class FilterCompiler(ClauseCompiler):
 
     def _like_clause(self, clause: Clause, inversion: bool = False):
         column = self._get_column(clause)
+        if not column:
+            raise ValueError(f'Column {clause.name} not found')
         operation = clause.operation
         value = f'%{operation.value}%'
-        if operation.case_sensitive:
+        if hasattr(operation, 'case_sensitive') and operation.case_sensitive:
             return column.notlike(value) if inversion else column.like(value)
         else:
             return column.notilike(value) if inversion else column.ilike(value)
 
     def _set_clause(self, clause: Clause, inversion: bool = False):
+        column = self._get_column(clause)
+        if not column:
+            raise ValueError(f'Column {clause.name} not found')
         value = list(clause.operation.value)
         if inversion:
-            return self._get_column(clause).notin_(value)
+            return column.notin_(value)
         else:
-            return self._get_column(clause).in_(value)
+            return column.in_(value)
 
     def _range_clause(self, clause: Clause):
         params = [
@@ -146,17 +160,21 @@ class OrderCompiler(ClauseCompiler):
         }
 
     def _compile(self, expression: ClauseExpression) -> list[sqlalchemy.ClauseElement]:
-        stack = deque()
+        stack: deque = deque()
         result = []
         for element in expression or ():
             if element is AND:
                 while stack:
                     result.append(stack.pop())
             else:
+                if self._space:
+                    column = self._schema.get_column(Address(element.name, self._space))
+                    if not column:
+                        raise ValueError(f'Column {element.name} not found')
+                else:
+                    raise ValueError(f"Space for column {element.name} must be defined")
                 result.append(
-                    self._operations[type(element.operation)](
-                        self._schema.get_column(Address(element.name, self._space))
-                    )
+                    self._operations[type(element.operation)](column)
                 )
         return result
 
@@ -169,12 +187,12 @@ class Query:
         self._schema = schema
         self._filter_compiler = FilterCompiler(self._schema)
         self._order_compiler = OrderCompiler(self._schema)
-        self._aliases = {}
-        self._select = []
-        self._joins = []
-        self._values = []
-        self._filters = []
-        self._orders = []
+        self._aliases: collections.abc.MutableMapping = {}
+        self._select: collections.abc.MutableSequence = []
+        self._joins: collections.abc.MutableSequence = []
+        self._values: collections.abc.MutableSequence = []
+        self._filters: collections.abc.MutableSequence = []
+        self._orders: collections.abc.MutableSequence = []
         self._limit = None
         self._offset = None
 
@@ -184,17 +202,21 @@ class Query:
 
     def _build_query(self, bucket: Bucket):
         if self._select:
-            q = sqlalchemy.select(*self._select)
-        elif self._values:
-            if self._filters:
-                q = sqlalchemy.update(self._schema.get_table(Space(bucket.name))).values(self._values[0])
-            else:
-                q = sqlalchemy.insert(self._schema.get_table(Space(bucket.name))).values(self._values)
+            q: typing.Any = sqlalchemy.select(*self._select)
         else:
-            if self._filters:
-                q = sqlalchemy.delete(self._schema.get_table(Space(bucket.name)))
+            table = self._schema.get_table(Space(bucket.name))
+            if not table:
+                raise ValueError(f"Table {bucket.name} not found")
+            if self._values:
+                if self._filters:
+                    q = sqlalchemy.update(table).values(self._values[0])
+                else:
+                    q = sqlalchemy.insert(table).values(self._values)
             else:
-                raise ValueError("Cannot determine operation type")
+                if self._filters:
+                    q = sqlalchemy.delete(table)
+                else:
+                    raise ValueError("Cannot determine operation type")
 
         for join in self._joins:
             q = q.join_from(*join, isouter=True)

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "hermitage-alchemy"
-version = "0.3.3"
+version = "0.3.4"
 description = "Implementation of hermitage contracts for sqlalchemy engine"
 authors = ["Smairon <man@smairon.ru>"]
 readme = "README.md"
@@ -14,3 +14,9 @@ sqlalchemy = "^2.0.20"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.dev-dependencies]
+mypy= "^1.11.1"
+
+[tool.mypy]
+disable_error_code = "import-untyped"

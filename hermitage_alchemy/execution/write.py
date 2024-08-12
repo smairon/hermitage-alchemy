@@ -45,6 +45,7 @@ class WriteExecutor:
         for element in haystack:
             if isinstance(element, needle):
                 return element
+        return None
 
 
 class WriteClient:
@@ -62,7 +63,7 @@ class WriteClient:
     async def __call__(
         self,
         invoice: Invoice
-    ) -> typing.NoReturn:
+    ):
         tasks = []
         async with asyncio.TaskGroup() as tg:
             for bucket in invoice:
