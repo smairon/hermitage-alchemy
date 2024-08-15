@@ -17,6 +17,7 @@ from hermitage.notation.default import (
     AND,
     OR
 )
+
 from .configuration import (
     Schema,
     M2O,
@@ -82,17 +83,18 @@ class FilterCompiler(ClauseCompiler):
 
         return stack.pop()
 
-    def _get_column(self, clause: Clause) -> sqlalchemy.Column | None:
+    def _get_column(self, clause: Clause) -> sqlalchemy.Column:
         if self._space:
-            return self._schema.get_column(Address(clause.name, self._space))
-        return None
+            result = self._schema.get_column(Address(clause.name, self._space))
+            if result is None:
+                raise ValueError(f'Column {clause.name} not found')
+            return result
+        else:
+            raise RuntimeError(f'')
 
     def _not_clause(self, clause: Clause) -> typing.Any:
         if isinstance(clause.operation, zodchy.operators.IS):
-            if column := self._get_column(clause):
-                return column.isnot(clause.operation.value)
-            else:
-                raise ValueError(f'Column {clause.name} not found')
+            return self._get_column(clause).isnot(clause.operation.value)
         elif isinstance(clause.operation, zodchy.operators.EQ):
             return operator.ne(self._get_column(clause), clause.operation.value)
         elif isinstance(clause.operation, zodchy.operators.LIKE):
@@ -116,8 +118,6 @@ class FilterCompiler(ClauseCompiler):
 
     def _like_clause(self, clause: Clause, inversion: bool = False):
         column = self._get_column(clause)
-        if not column:
-            raise ValueError(f'Column {clause.name} not found')
         operation = clause.operation
         value = f'%{operation.value}%'
         if hasattr(operation, 'case_sensitive') and operation.case_sensitive:
@@ -127,8 +127,6 @@ class FilterCompiler(ClauseCompiler):
 
     def _set_clause(self, clause: Clause, inversion: bool = False):
         column = self._get_column(clause)
-        if not column:
-            raise ValueError(f'Column {clause.name} not found')
         value = list(clause.operation.value)
         if inversion:
             return column.notin_(value)
@@ -169,13 +167,11 @@ class OrderCompiler(ClauseCompiler):
             else:
                 if self._space:
                     column = self._schema.get_column(Address(element.name, self._space))
-                    if not column:
-                        raise ValueError(f'Column {element.name} not found')
+                    result.append(
+                        self._operations[type(element.operation)](column)
+                    )
                 else:
                     raise ValueError(f"Space for column {element.name} must be defined")
-                result.append(
-                    self._operations[type(element.operation)](column)
-                )
         return result
 
 
@@ -205,7 +201,7 @@ class Query:
             q: typing.Any = sqlalchemy.select(*self._select)
         else:
             table = self._schema.get_table(Space(bucket.name))
-            if not table:
+            if table is None:
                 raise ValueError(f"Table {bucket.name} not found")
             if self._values:
                 if self._filters:
