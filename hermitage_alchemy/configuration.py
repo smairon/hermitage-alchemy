@@ -158,7 +158,7 @@ class Schema:
             return self._cache[str(space)]
         last_unit = space[-1]
         result: typing.Any = self._tables.get(last_unit.name)
-        if result:
+        if result is not None:
             if last_unit.label or last_unit.qua:
                 result = result.alias(str(space))
                 self._cache[str(space)] = result
@@ -169,7 +169,7 @@ class Schema:
         try:
             address_string = str(address)
             if address_string not in self._cache:
-                if table := self.get_table(address.space):
+                if (table := self.get_table(address.space)) is not None:
                     column = getattr(table.c, address.name)
                 else:
                     return None
