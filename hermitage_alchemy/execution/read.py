@@ -68,7 +68,7 @@ class Squeezer:
             if isinstance(v, collections.abc.MutableMapping):
                 v = self._collapse_none(v) if any(_ is not None for _ in v.values()) else None
             if isinstance(v, list):
-                v = [self._collapse_none(_) for _ in v]
+                v = [self._collapse_none(_) if isinstance(_, collections.abc.MutableMapping) else _ for _ in v]
             result[k] = v
         return result
 
